@@ -56,6 +56,13 @@ posToStr :: BNFC'Position -> String
 posToStr (Just (x, _)) = show x
 posToStr Nothing = "Nothing"
 
+typeToStr :: Type -> String
+typeToStr (Int _) = "int"
+typeToStr (Bool _) = "boolean"
+typeToStr (Str _) = "string"
+typeToStr (Void _) = "void"
+
+
 isVoid :: Type -> Bool
 isVoid (Void _) = True
 isVoid _        = False
@@ -250,21 +257,25 @@ typeCheckStmt (Decl pos t items) typ = do
 typeCheckDecls :: [Item] -> Type -> IM TypeEnv
 typeCheckDecls [Init  pos id e] t = do
   (vEnv, fEnv) <- ask
+  --trzeba sprawdzic czy nie ma już takiej zmiennej
   typeOfExpr <- typeCheckExpr e
   if typeEquals typeOfExpr t
     then do
       --env' <- Map.insert x t env -- Update the environment
       return (Map.insert id t vEnv, fEnv)
-    else throwError ["Type mismatch at line " ++ posToStr pos]
+    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr 
+                    ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
 typeCheckDecls (Init  pos id e : items) t = do
   (vEnv, fEnv) <- ask
+  --trzeba sprawdzic czy nie ma już takiej zmiennej
   typeOfExpr <- typeCheckExpr e
   if typeEquals typeOfExpr t
     then do
       let env' = (Map.insert id t vEnv, fEnv)
       env'' <- local (const env') $ typeCheckDecls items t
       return env''
-    else throwError ["Type mismatch at line " ++ posToStr pos]
+    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr 
+                    ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
 typeCheckDecls [NoInit  pos id] t = do
   (vEnv, fEnv) <- ask
   --trzeba sprawdzic czy nie ma już takiej zmiennej

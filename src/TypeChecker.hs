@@ -27,9 +27,8 @@ import Control.Monad.Trans.Class
 data FunType = FunType
   { funName :: Ident,
     funReturnType :: Type,
-    funArgs :: [Arg],
-    funBlock :: Block,
-    funPos :: BNFC'Position
+    funArgs :: [Arg]
+    --funPos :: BNFC'Position
   } deriving (Eq)
 
 
@@ -73,7 +72,9 @@ isBool _        = False
 type Var = Ident
 type WasThereAReturn = Bool
 
-type TypeEnv = Map.Map Var Type
+type VarTypeEnv = Map.Map Var Type
+type FunTypeEnv = Map.Map Ident FunType
+type TypeEnv = (VarTypeEnv, FunTypeEnv) 
 type ErrorList = [String]
 type IM a = ReaderT TypeEnv (ExceptT ErrorList IO) a
 
@@ -103,8 +104,8 @@ typeCheckExpr (ELitFalse pos) = return $ Bool pos
 typeCheckExpr (ELitInt pos _) = return $ Int pos
 typeCheckExpr (EString pos _) = return $ Str pos
 typeCheckExpr (EVar pos id) = do
-  env <- ask
-  case Map.lookup id env of
+  (vEnv, fEnv) <- ask
+  case Map.lookup id vEnv of
     Just t -> return t
     Nothing -> throwError ["Use of uninitialised variable at line " ++ posToStr pos]
 typeCheckExpr (Neg pos e) = do 
@@ -182,7 +183,12 @@ typeCheckExpr (EOr pos e1 e2) = do
         then return $ Bool pos
         else throwError ["Second argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
     else throwError ["First argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
-typeCheckExpr (EApp pos id exprs) = do return $ Bool pos
+typeCheckExpr (EApp pos id exprs) = do
+  --todo trzeba argsy sprawdzic czy są dobre typy
+  (vEnv, fEnv) <- ask
+  case Map.lookup id fEnv of
+    Just (FunType name funRetType argumetns) -> return funRetType
+    Nothing -> throwError ["Use of uninitialised function " ++ identToString id ++ " at line " ++ posToStr pos]
 
 
 typeCheckStmt :: Stmt -> Type -> IM (TypeEnv, WasThereAReturn)
@@ -190,15 +196,15 @@ typeCheckStmt (Empty _) t = do
   env <- ask
   return (env, False)
 typeCheckStmt (Ass pos x e) t = do
-  env <- ask
-  case Map.lookup x env of
+  (vEnv, fEnv) <- ask
+  case Map.lookup x vEnv of
     Nothing -> throwError ["Uninitialised varaible at line " ++ posToStr pos] 
     Just _ -> do
       typeOfExpr <- typeCheckExpr e
       if typeEquals typeOfExpr t
         then do
           --env' <- Map.insert x t env -- Update the environment
-          return (Map.insert x t env, False)
+          return ((Map.insert x t vEnv, fEnv), False)
         else throwError ["Type mismatch at line " ++ show pos]
 
 typeCheckStmt (Incr pos x) t = do
@@ -243,36 +249,36 @@ typeCheckStmt (Decl pos t items) typ = do
 
 typeCheckDecls :: [Item] -> Type -> IM TypeEnv
 typeCheckDecls [Init  pos id e] t = do
-  env <- ask
+  (vEnv, fEnv) <- ask
   typeOfExpr <- typeCheckExpr e
   if typeEquals typeOfExpr t
     then do
       --env' <- Map.insert x t env -- Update the environment
-      return $ Map.insert id t env
+      return (Map.insert id t vEnv, fEnv)
     else throwError ["Type mismatch at line " ++ posToStr pos]
 typeCheckDecls (Init  pos id e : items) t = do
-  env <- ask
+  (vEnv, fEnv) <- ask
   typeOfExpr <- typeCheckExpr e
   if typeEquals typeOfExpr t
     then do
-      let env' = Map.insert id t env
+      let env' = (Map.insert id t vEnv, fEnv)
       env'' <- local (const env') $ typeCheckDecls items t
       return env''
     else throwError ["Type mismatch at line " ++ posToStr pos]
 typeCheckDecls [NoInit  pos id] t = do
-  env <- ask
+  (vEnv, fEnv) <- ask
   --trzeba sprawdzic czy nie ma już takiej zmiennej
-  return $ Map.insert id t env
+  return (Map.insert id t vEnv, fEnv)
 typeCheckDecls (NoInit  pos id : items) t = do
-  env <- ask
+  (vEnv, fEnv) <- ask
   --trzeba sprawdzic czy nie ma już takiej zmiennej
-  let env' = Map.insert id t env
+  let env' = (Map.insert id t vEnv, fEnv)
   env'' <- local (const env') $ typeCheckDecls items t
   return env''
 
 
 
-
+--todo to nie będzie działało dla ifów i dla whilów, bo tam blocki nie muszą miec returna na końću 
 typeCheckStmts :: [Stmt] -> Type -> IM TypeEnv
 --typeCheckStmts stmts = do
   --mapM_ typeCheckStmt stmts -- Assuming typeCheckStmt is defined to handle single statements
@@ -286,8 +292,8 @@ typeCheckStmts [stmt] t = do  -- Case for a single statement
     --uwaga tutaj zwracam enva otrzymanefo z typeCheckStmt
     else return env'
 typeCheckStmts (stmt : rest) t = do  -- Recursive case for multiple statements
-  env <- ask
-  (env', wasReturn) <- local (const env) $ typeCheckStmt stmt t
+  (vEnv, fEnv) <- ask
+  (env', wasReturn) <- local (const (vEnv, fEnv)) $ typeCheckStmt stmt t
   if wasReturn
     then throwError ["Return must be the last instruction in function."]
     else do
@@ -300,11 +306,14 @@ typeCheckStmts (stmt : rest) t = do  -- Recursive case for multiple statements
 -- GVarDecl a (Type' a) [Item' a]
 -- GVarInit a Ident (Expr' a)
 
+
+
 typeCheckTopDef :: TopDef -> IM TypeEnv
 typeCheckTopDef (FnDef pos t id args (Block posB stmts)) = do
-  typeCheckStmts stmts t
-  env <- ask
-  return env
+  (vEnv, fEnv) <- ask
+  let env' = (vEnv, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
+  env'' <- local (const env') $ typeCheckStmts stmts t
+  return env''
 typeCheckTopDef (GVarDecl pos t items) = do
   env <- ask
   return env
@@ -312,19 +321,29 @@ typeCheckTopDef (GVarInit pos id expr) = do
   env <- ask
   return env
 
+
+typeCheckTopDefs :: [TopDef] -> IM TypeEnv
+typeCheckTopDefs [def] = do
+  env' <- typeCheckTopDef def 
+  return env'
+typeCheckTopDefs (def : restDefs) = do
+  env' <- typeCheckTopDef def 
+  env'' <- local (const env') $ typeCheckTopDefs restDefs
+  return env''
+
+
 typeCheckProgram :: Program -> IM TypeEnv
 typeCheckProgram (Program pos []) =
   --istnieje szansa, że my w ogóle nie chcemy tego błęu wykrywać na poziomie frontendu
   --i tutaj chcemy po prostu zwrócić env albo w ogóle nie robić tego przypadku
   throwError ["No main() function."]
-typeCheckProgram (Program pos topDefs) = do
-  mapM_ typeCheckTopDef topDefs -- Apply typeCheckTopDef to each TopDef
-  env <- ask -- Retrieve the final environment after type checking
-  return env
+--typeCheckProgram (Program pos topDefs) = do
+  --mapM_ typeCheckTopDef topDefs -- Apply typeCheckTopDef to each TopDef
+  --env <- ask -- Retrieve the final environment after type checking
+  --return env
 --wersja z rekursją
---typeCheckProgram (Program pos (def : restDefs)) = do
-  --  typeCheckTopDef def -- Apply type checking to the current TopDef
-    --typeCheckProgram (Program pos restDefs) -- Recur with the remaining TopDefs
+typeCheckProgram (Program pos topdefs) = do
+    typeCheckTopDefs topdefs
 
 
 parse :: String -> Either String Program
@@ -333,9 +352,9 @@ parse input =
     Ok program -> Right program
     Bad err -> Left err
 
-
+--todo trzeba od razu dodać tutaj do funkcji te wbudowane funkcje
 initialEnv :: TypeEnv
-initialEnv = Map.empty
+initialEnv = (Map.empty, Map.empty)
 
 
 handleInput :: FilePath -> String -> IO ()

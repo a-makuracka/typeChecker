@@ -6,9 +6,9 @@ Program.   Program ::= [TopDef] ;
 
 FnDef.	   TopDef ::= Type Ident "(" [Arg] ")" Block ;
 
-GVarDecl.  TopDef ::= Type [Item] ;
+-- GVarDecl.  TopDef ::= Type [Item] ;
 
-GVarInit.  TopDef ::= Ident "=" Expr ";" ;
+-- GVarInit.  TopDef ::= Ident "=" Expr ";" ;
 
 separator nonempty TopDef "" ;
 

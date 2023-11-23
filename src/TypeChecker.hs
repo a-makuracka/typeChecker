@@ -78,10 +78,11 @@ isBool _        = False
 
 type Var = Ident
 type WasThereAReturn = Bool
+type IsFun = Bool
 
 type VarTypeEnv = Map.Map Var Type
 type FunTypeEnv = Map.Map Ident FunType
-type TypeEnv = (VarTypeEnv, FunTypeEnv) 
+type TypeEnv = (VarTypeEnv, FunTypeEnv)
 type ErrorList = [String]
 type IM a = ReaderT TypeEnv (ExceptT ErrorList IO) a
 
@@ -115,54 +116,54 @@ typeCheckExpr (EVar pos id) = do
   case Map.lookup id vEnv of
     Just t -> return t
     Nothing -> throwError ["Use of uninitialised variable at line " ++ posToStr pos]
-typeCheckExpr (Neg pos e) = do 
+typeCheckExpr (Neg pos e) = do
   env <- ask
   typeOfE <- typeCheckExpr e
-  if isInt typeOfE 
+  if isInt typeOfE
     then return $ Int pos
     else throwError ["Cannot negate a non-integer value at line " ++ posToStr pos]
-typeCheckExpr (Not pos e) = do 
+typeCheckExpr (Not pos e) = do
   env <- ask
   typeOfE <- typeCheckExpr e
-  if isBool typeOfE 
+  if isBool typeOfE
     then return $ Bool pos
     else throwError ["Cannot execute a 'Not' operation a non-boolean value at line " ++ posToStr pos]
-typeCheckExpr (EAdd pos e1 op e2) = do 
+typeCheckExpr (EAdd pos e1 op e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
-  if isInt typeOfE1 
-    then do 
-      if isInt typeOfE2 
+  if isInt typeOfE1
+    then do
+      if isInt typeOfE2
         then return $ Int pos
         else throwError ["Second argument of add operation is a non-integer value at line " ++ posToStr pos]
     else throwError ["First argument of add operation is a non-integer value at line " ++ posToStr pos]
-typeCheckExpr (EMul pos e1 op e2) = do 
+typeCheckExpr (EMul pos e1 op e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
-  if isInt typeOfE1 
-    then do 
-      if isInt typeOfE2 
+  if isInt typeOfE1
+    then do
+      if isInt typeOfE2
         then return $ Int pos
         else throwError ["Second argument of mul operation is a non-integer value at line " ++ posToStr pos]
     else throwError ["First argument of mul operation is a non-integer value at line " ++ posToStr pos]
-typeCheckExpr (ERel pos e1 op e2) = do 
+typeCheckExpr (ERel pos e1 op e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
   case (typeOfE1, typeOfE2) of
     (Int _, Int _) -> do return $ Bool pos --dla intów każda operacja jest okej
-    (Bool _, Bool _) -> do 
-      case op of 
+    (Bool _, Bool _) -> do
+      case op of
         (EQU _) -> return $ Bool pos
         (NE _) -> return $ Bool pos
         (GE _) -> throwError ["Cannot perform '>=' operation on boolean values at line " ++ posToStr pos]
         (LE _) -> throwError ["Cannot perform '<=' operation on boolean values at line " ++ posToStr pos]
         (LTH _) -> throwError ["Cannot perform '<' operation on boolean values at line " ++ posToStr pos]
         (GTH _) -> throwError ["Cannot perform '>' operation on boolean values at line " ++ posToStr pos]
-    (Str _, Str _) -> do 
-      case op of 
+    (Str _, Str _) -> do
+      case op of
         (EQU _) -> return $ Bool pos
         (NE _) -> return $ Bool pos
         (GE _) -> throwError ["Cannot perform '>=' operation on strings at line " ++ posToStr pos]
@@ -170,23 +171,23 @@ typeCheckExpr (ERel pos e1 op e2) = do
         (LTH _) -> throwError ["Cannot perform '<' operation on strings at line " ++ posToStr pos]
         (GTH _) -> throwError ["Cannot perform '>' operation on strings at line " ++ posToStr pos]
     (_, _) -> do throwErrorForRelOp op pos
-typeCheckExpr (EAnd pos e1 e2) = do 
+typeCheckExpr (EAnd pos e1 e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
-  if isBool typeOfE1 
-    then do 
-      if isBool typeOfE2 
+  if isBool typeOfE1
+    then do
+      if isBool typeOfE2
         then return $ Bool pos
         else throwError ["Second argument of 'and' operation is a non-boolean value at line " ++ posToStr pos]
     else throwError ["First argument of 'and' operation is a non-boolean value at line " ++ posToStr pos]
-typeCheckExpr (EOr pos e1 e2) = do 
+typeCheckExpr (EOr pos e1 e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
-  if isBool typeOfE1 
-    then do 
-      if isBool typeOfE2 
+  if isBool typeOfE1
+    then do
+      if isBool typeOfE2
         then return $ Bool pos
         else throwError ["Second argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
     else throwError ["First argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
@@ -199,20 +200,21 @@ typeCheckExpr (EApp pos id exprs) = do
 
 
 typeCheckStmt :: Stmt -> Type -> IM (TypeEnv, WasThereAReturn)
-typeCheckStmt (Empty _) t = do
+typeCheckStmt (Empty _) _ = do
   env <- ask
   return (env, False)
-typeCheckStmt (Ass pos x e) t = do
+typeCheckStmt (Ass pos id e) _ = do
   (vEnv, fEnv) <- ask
-  case Map.lookup x vEnv of
-    Nothing -> throwError ["Uninitialised varaible at line " ++ posToStr pos] 
-    Just _ -> do
+  case Map.lookup id vEnv of
+    Nothing -> throwError ["Uninitialised variable at line " ++ posToStr pos]
+    Just t -> do
       typeOfExpr <- typeCheckExpr e
       if typeEquals typeOfExpr t
         then do
-          --env' <- Map.insert x t env -- Update the environment
-          return ((Map.insert x t vEnv, fEnv), False)
-        else throwError ["Type mismatch at line " ++ show pos]
+          --return ((Map.insert id t vEnv, fEnv), False)
+          return ((vEnv, fEnv), False)
+        else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
+                    ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
 
 typeCheckStmt (Incr pos x) t = do
   env <- ask
@@ -220,9 +222,16 @@ typeCheckStmt (Incr pos x) t = do
 typeCheckStmt (Decr pos x) t = do
   env <- ask
   return (env, False)
-typeCheckStmt (Ret pos e) t = do
-  env <- ask
-  return (env, True)
+typeCheckStmt (Ret pos e) expectedRetType = do
+  if isVoid expectedRetType 
+    then throwError ["Cannot return value from void function at line " ++ posToStr pos] 
+    else do
+      env <- ask
+      actualTypeOfExpr <- typeCheckExpr e
+      if not $ typeEquals actualTypeOfExpr expectedRetType 
+        then throwError ["Return type mismatch: Expected " ++ typeToStr expectedRetType 
+                        ++ ", but found " ++ typeToStr actualTypeOfExpr ++ " at line " ++ posToStr pos]
+        else return (env, True)
 --trzeba sprawdzić czy typ e jest taki jaki mmay zwrócić
 typeCheckStmt (VRet pos) t = do
   env <- ask
@@ -234,21 +243,28 @@ typeCheckStmt (Cond pos condition block) t = do
   return (env, False)
 typeCheckStmt (CondElse pos condExpr stmtTrue stmtFalse) t = do
   env <- ask
-  return (env, False)
+  typeOfExpr <- typeCheckExpr condExpr
+  if not $ isBool typeOfExpr 
+    then throwError ["Condition has to be boolean."] 
+    else do 
+      (_, wasThereRetunInT) <- local (const env) $ typeCheckStmt stmtTrue t
+      (_, wasThereRetunInF) <- local (const env) $ typeCheckStmt stmtFalse t
+      return (env, wasThereRetunInT && wasThereRetunInF)
 typeCheckStmt (SExp pos e) t = do
   env <- ask
   return (env, False)
 typeCheckStmt (While pos cond stmt) t = do
   env <- ask
   return (env, False)
-typeCheckStmt (BStmt pos block) t = do
+typeCheckStmt (BStmt pos (Block posB stmts)) t = do
   env <- ask
-  return (env, False)
+  (env', wasReturn) <- typeCheckStmts stmts t
+  return (env, wasReturn)
 typeCheckStmt (Decl pos t []) typ = do
   throwError ["wrong decl"]
 typeCheckStmt (Decl pos t items) typ = do
   if isVoid t
-    then throwError ["Cannot create variable of type void at line " ++ posToStr pos] 
+    then throwError ["Cannot create variable of type void at line " ++ posToStr pos]
     else do
       env' <- typeCheckDecls items t
       return (env', False)
@@ -263,7 +279,7 @@ typeCheckDecls [Init  pos id e] t = do
     then do
       --env' <- Map.insert x t env -- Update the environment
       return (Map.insert id t vEnv, fEnv)
-    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr 
+    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
                     ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
 typeCheckDecls (Init  pos id e : items) t = do
   (vEnv, fEnv) <- ask
@@ -274,7 +290,7 @@ typeCheckDecls (Init  pos id e : items) t = do
       let env' = (Map.insert id t vEnv, fEnv)
       env'' <- local (const env') $ typeCheckDecls items t
       return env''
-    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr 
+    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
                     ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
 typeCheckDecls [NoInit  pos id] t = do
   (vEnv, fEnv) <- ask
@@ -290,32 +306,25 @@ typeCheckDecls (NoInit  pos id : items) t = do
 
 
 --todo to nie będzie działało dla ifów i dla whilów, bo tam blocki nie muszą miec returna na końću 
-typeCheckStmts :: [Stmt] -> Type -> IM TypeEnv
---typeCheckStmts stmts = do
-  --mapM_ typeCheckStmt stmts -- Assuming typeCheckStmt is defined to handle single statements
-  --ask -- Return the current environment after type checking
-typeCheckStmts [] _ = ask
-typeCheckStmts [stmt] t = do  -- Case for a single statement
+typeCheckStmts :: [Stmt] -> Type -> IM (TypeEnv, WasThereAReturn)
+typeCheckStmts [] _ = do 
+  env <- ask
+  return (env, False)
+typeCheckStmts [stmt] t  = do  
   env <- ask
   (env', wasReturn) <- local (const env) $ typeCheckStmt stmt t
-  if not wasReturn
-    then throwError ["No return."]
-    --uwaga tutaj zwracam enva otrzymanefo z typeCheckStmt
-    else return env'
-typeCheckStmts (stmt : rest) t = do  -- Recursive case for multiple statements
+  --if not wasReturn && isFun
+    --then throwError ["No return."]
+    --else 
+  return (env', wasReturn)
+typeCheckStmts (stmt : rest) t = do  
   (vEnv, fEnv) <- ask
-  (env', wasReturn) <- local (const (vEnv, fEnv)) $ typeCheckStmt stmt t
-  if wasReturn
-    then throwError ["Return must be the last instruction in function."]
-    else do
-      env'' <- local (const env') $ typeCheckStmts rest t
-      --uwaga tutaj zwracam enva tego otrzymanefo z typeCheckStmt
-      return env''
-
-
--- FnDef a (Type' a) Ident [Arg' a] (Block' a)
--- GVarDecl a (Type' a) [Item' a]
--- GVarInit a Ident (Expr' a)
+  (env', wasReturnInFirst) <- local (const (vEnv, fEnv)) $ typeCheckStmt stmt t
+  --if wasReturn
+    --then throwError ["Return must be the last instruction in function."]
+    --else do
+  (env'', wasReturnInRest) <- local (const env') $ typeCheckStmts rest t 
+  return (env'', wasReturnInFirst || wasReturnInRest)
 
 
 
@@ -323,22 +332,25 @@ typeCheckTopDef :: TopDef -> IM TypeEnv
 typeCheckTopDef (FnDef pos t id args (Block posB stmts)) = do
   (vEnv, fEnv) <- ask
   let env' = (vEnv, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
-  env'' <- local (const env') $ typeCheckStmts stmts t
-  return env''
-typeCheckTopDef (GVarDecl pos t items) = do
+  (env'', wasReturn) <- local (const env') $ typeCheckStmts stmts t
+  --być może można tutaj na poziomie topdefu sprawdzić czy był return i tyle xD
+  if not wasReturn 
+    then throwError ["no return in function " ++ show id]
+    else return env''
+{- typeCheckTopDef (GVarDecl pos t items) = do
   env <- ask
   return env
 typeCheckTopDef (GVarInit pos id expr) = do
   env <- ask
-  return env
+  return env -}
 
 
 typeCheckTopDefs :: [TopDef] -> IM TypeEnv
 typeCheckTopDefs [def] = do
-  env' <- typeCheckTopDef def 
+  env' <- typeCheckTopDef def
   return env'
 typeCheckTopDefs (def : restDefs) = do
-  env' <- typeCheckTopDef def 
+  env' <- typeCheckTopDef def
   env'' <- local (const env') $ typeCheckTopDefs restDefs
   return env''
 

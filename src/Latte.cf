@@ -14,7 +14,7 @@ separator nonempty TopDef "" ;
 
 Arg. 	   Arg ::= Type Ident;
 
-Argp. 	   Arg ::= Type "&" Ident;
+-- Argp. 	   Arg ::= Type "&" Ident;
 
 separator  Arg "," ;
 

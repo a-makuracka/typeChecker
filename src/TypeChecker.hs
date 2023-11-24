@@ -114,8 +114,8 @@ typeEqualsForArgs (Arg pos argType id) expectedType = typeEquals argType expecte
 
 checkArgs :: [Expr] -> [Arg] -> BNFC'Position -> IM TypeEnv
 checkArgs [] [] _ = ask
-checkArgs (e:exprs) [] pos = throwError ["To many function arguments at line: " ++ posToStr pos]
-checkArgs [] (a:args) pos = throwError ["To little function arguemnts at line: " ++ posToStr pos]
+checkArgs (e:exprs) [] pos = throwError ["Too many function arguments at line: " ++ posToStr pos]
+checkArgs [] (a:args) pos = throwError ["Too few function arguments at line: " ++ posToStr pos]
 checkArgs (e:exps) ((Arg posA argType id):args) pos = do
   typeOfE <- typeCheckExpr e
   if not $ typeEquals argType typeOfE
@@ -292,16 +292,16 @@ typeCheckStmt (VRet pos) expectedRetType = do
       env <- ask
       return (env, True)
 typeCheckStmt (Cond pos condExpr stmt) t = do
-  --todo ewentualnie mozna dodać że jesli jest if(true) return no to jest return
   env <- ask
   typeOfExpr <- typeCheckExpr condExpr
   if not $ isBool typeOfExpr
     then throwError ["Condition has to be boolean at line " ++ posToStr pos]
     else do
-      (_, _) <- typeCheckStmt stmt t
-      return (env, False)
+      (_, wasThereReturn) <- typeCheckStmt stmt t
+      if isAlwaysTrue condExpr 
+        then return (env, wasThereReturn)
+        else return (env, False)
 typeCheckStmt (CondElse pos condExpr stmtTrue stmtFalse) t = do
-  --todo if(true) i if(false)
   env <- ask
   typeOfExpr <- typeCheckExpr condExpr
   if not $ isBool typeOfExpr

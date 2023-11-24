@@ -378,13 +378,18 @@ addArgsToEnv ((Arg pos argType id):args) = do
 
 typeCheckTopDef :: TopDef -> IM TypeEnv
 typeCheckTopDef (FnDef pos t id args (Block posB stmts)) = do
-  (vEnv, fEnv) <- ask
+  {-(vEnv, fEnv) <- ask
   let env' = (vEnv, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
   env'' <- local (const env') $ addArgsToEnv args
   (env''', wasReturn) <- local (const env'') $ typeCheckStmts stmts t
   if not wasReturn
     then throwError ["no return in function " ++ show id]
-    else return env'''
+    else return env'''-}
+  env' <- addArgsToEnv args
+  (env'', wasReturn) <- local (const env') $ typeCheckStmts stmts t
+  if not wasReturn
+    then throwError ["No return in function " ++ show id]
+    else return env''
 
 
 typeCheckTopDefs :: [TopDef] -> IM TypeEnv
@@ -393,9 +398,18 @@ typeCheckTopDefs [def] = do
   return env'
 typeCheckTopDefs (def : restDefs) = do
   (vEnv, fEnv) <- ask
-  (vEnv', fEnv') <- typeCheckTopDef def
-  --chcemy żeby kolejna funkcja widziała wyżej zadeklarowane funkcje, ale nie widziała deklarowanych w nich zmiennych
-  env'' <- local (const (vEnv, fEnv')) $ typeCheckTopDefs restDefs
+  (_, _) <- typeCheckTopDef def
+  --wywołujemy z envem lokalnym, bo nie chcemy, żeby zmienne deklarowane w funkcji f były widoczne w funkcji g
+  env'' <- local (const (vEnv, fEnv)) $ typeCheckTopDefs restDefs
+  return env''
+
+
+addAllFunctionsToEnv :: [TopDef] -> IM TypeEnv
+addAllFunctionsToEnv [] = ask
+addAllFunctionsToEnv ((FnDef pos t id args (Block posB stmts)): restDefs) = do
+  (vEnv, fEnv) <- ask
+  let env' = (vEnv, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
+  env'' <- local (const env') $ addAllFunctionsToEnv restDefs
   return env''
 
 
@@ -410,7 +424,8 @@ typeCheckProgram (Program pos []) =
   --return env
 --wersja z rekursją
 typeCheckProgram (Program pos topdefs) = do
-    typeCheckTopDefs topdefs
+  env' <- addAllFunctionsToEnv topdefs
+  local (const env') $ typeCheckTopDefs topdefs
 
 
 parse :: String -> Either String Program

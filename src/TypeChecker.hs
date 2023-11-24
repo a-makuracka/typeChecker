@@ -125,6 +125,14 @@ checkArgs (e:exps) ((Arg posA argType id):args) pos = do
       --(vEnv, fEnv) <- ask
       checkArgs exps args pos
 
+isAlwaysTrue :: Expr -> Bool
+isAlwaysTrue (ELitTrue pos) = True
+isAlwaysTrue _ = False
+
+isAlwaysFalse :: Expr -> Bool
+isAlwaysFalse (ELitFalse pos) = True
+isAlwaysFalse _ = False
+
 
 typeCheckExpr :: Expr ->  IM Type
 typeCheckExpr (ELitTrue pos) = return $ Bool pos
@@ -154,12 +162,17 @@ typeCheckExpr (EAdd pos e1 op e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
   typeOfE2 <- typeCheckExpr e2
-  if isInt typeOfE1
-    then do
-      if isInt typeOfE2
-        then return $ Int pos
-        else throwError ["Second argument of add operation is a non-integer value at line " ++ posToStr pos]
-    else throwError ["First argument of add operation is a non-integer value at line " ++ posToStr pos]
+  case (typeOfE1, typeOfE2) of
+    (Int _, Int _) -> return $ Int pos
+    (Str _, Str _) -> return $ Str pos
+    (Bool _, Bool _) -> throwError 
+      ["Cannot add boolean values at line: " ++ posToStr pos]
+    (Int _, Str _) -> throwError 
+      ["Left operand of 'add' operation is an integer and right operand is string at line: " ++ posToStr pos]
+    (Str _, Int _) -> throwError 
+      ["Left operand of 'add' operation is string and right operand is an integer at line: " ++ posToStr pos]
+    (_, _) -> throwError 
+      ["Wrong types of operands for 'add' operation at line " ++ posToStr pos]
 typeCheckExpr (EMul pos e1 op e2) = do
   env <- ask
   typeOfE1 <- typeCheckExpr e1
@@ -279,6 +292,7 @@ typeCheckStmt (VRet pos) expectedRetType = do
       env <- ask
       return (env, True)
 typeCheckStmt (Cond pos condExpr stmt) t = do
+  --todo ewentualnie mozna dodać że jesli jest if(true) return no to jest return
   env <- ask
   typeOfExpr <- typeCheckExpr condExpr
   if not $ isBool typeOfExpr
@@ -287,6 +301,7 @@ typeCheckStmt (Cond pos condExpr stmt) t = do
       (_, _) <- typeCheckStmt stmt t
       return (env, False)
 typeCheckStmt (CondElse pos condExpr stmtTrue stmtFalse) t = do
+  --todo if(true) i if(false)
   env <- ask
   typeOfExpr <- typeCheckExpr condExpr
   if not $ isBool typeOfExpr
@@ -294,7 +309,12 @@ typeCheckStmt (CondElse pos condExpr stmtTrue stmtFalse) t = do
     else do
       (_, wasThereRetunInT) <- local (const env) $ typeCheckStmt stmtTrue t
       (_, wasThereRetunInF) <- local (const env) $ typeCheckStmt stmtFalse t
-      return (env, wasThereRetunInT && wasThereRetunInF)
+      if isAlwaysTrue condExpr 
+        then return (env, wasThereRetunInT)
+        else do
+          if isAlwaysFalse condExpr 
+            then return (env, wasThereRetunInF)
+            else return (env, wasThereRetunInT && wasThereRetunInF)
 typeCheckStmt (SExp pos e) t = do
   env <- ask
   typeCheckExpr e
@@ -397,9 +417,10 @@ typeCheckTopDef (FnDef pos t id args (Block posB stmts)) = do
     else return env'''-}
   env' <- addArgsToEnv args
   (env'', wasReturn) <- local (const env') $ typeCheckStmts stmts t
-  if not wasReturn
-    then throwError ["No return in function " ++ show id]
+  if not wasReturn && not (isVoid t)
+    then throwError ["No return in function " ++ identToString id]
     else return env''
+
 
 
 typeCheckTopDefs :: [TopDef] -> IM TypeEnv

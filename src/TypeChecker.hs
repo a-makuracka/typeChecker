@@ -77,13 +77,13 @@ isBool (Bool _) = True
 isBool _        = False
 
 
-type Var = Ident
+--type Var = Ident
 type WasThereAReturn = Bool
 type IsFun = Bool
 
-type VarTypeEnv = Map.Map Var Type
+type VarTypeEnv = Map.Map Ident Type
 type FunTypeEnv = Map.Map Ident FunType
-type TypeEnv = (VarTypeEnv, FunTypeEnv)
+type TypeEnv = (VarTypeEnv, VarTypeEnv, FunTypeEnv)
 type ErrorList = [String]
 type IM a = ReaderT TypeEnv (ExceptT ErrorList IO) a
 
@@ -122,7 +122,7 @@ checkArgs (e:exps) ((Arg posA argType id):args) pos = do
     then throwError ["Wrong type for argument: '" ++ identToString id ++ "'. Expected: '" ++ typeToStr argType
     ++ "' but found: '" ++ typeToStr typeOfE ++ "' at line: " ++ posToStr pos]
     else do
-      (vEnv, fEnv) <- ask
+      --(vEnv, fEnv) <- ask
       checkArgs exps args pos
 
 
@@ -132,10 +132,12 @@ typeCheckExpr (ELitFalse pos) = return $ Bool pos
 typeCheckExpr (ELitInt pos _) = return $ Int pos
 typeCheckExpr (EString pos _) = return $ Str pos
 typeCheckExpr (EVar pos id) = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  case Map.lookup id vEnvNew of
     Just t -> return t
-    Nothing -> throwError ["Use of uninitialised variable at line " ++ posToStr pos]
+    Nothing -> case Map.lookup id vEnvOld of
+      Just t -> return t
+      Nothing -> throwError ["Use of undefined variable at line " ++ posToStr pos]
 typeCheckExpr (Neg pos e) = do
   env <- ask
   typeOfE <- typeCheckExpr e
@@ -212,13 +214,22 @@ typeCheckExpr (EOr pos e1 e2) = do
         else throwError ["Second argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
     else throwError ["First argument of 'or' operation is a non-boolean value at line " ++ posToStr pos]
 typeCheckExpr (EApp pos id exprs) = do
-  (vEnv, fEnv) <- ask
+  (_, _, fEnv) <- ask
   case Map.lookup id fEnv of
     Just (FunType name funRetType arguments) -> do
       checkArgs exprs arguments pos
       return funRetType
-    Nothing -> throwError ["Use of uninitialised function " ++ identToString id ++ " at line " ++ posToStr pos]
+    Nothing -> throwError ["Use of undeclared function " ++ identToString id ++ " at line " ++ posToStr pos]
 
+
+checkTypeForId :: Ident -> BNFC'Position -> IM Type
+checkTypeForId id pos = do
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  case Map.lookup id vEnvNew of
+    Nothing -> case Map.lookup id  vEnvOld of 
+      Nothing -> throwError ["Undeclared variable at line " ++ posToStr pos]
+      Just t -> return t
+    Just t -> return t
 
 
 typeCheckStmt :: Stmt -> Type -> IM (TypeEnv, WasThereAReturn)
@@ -226,33 +237,31 @@ typeCheckStmt (Empty _) _ = do
   env <- ask
   return (env, False)
 typeCheckStmt (Ass pos id e) _ = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of
-    Nothing -> throwError ["Uninitialized variable at line " ++ posToStr pos]
-    Just t -> do
-      typeOfExpr <- typeCheckExpr e
-      if typeEquals typeOfExpr t
-        then do
-          --return ((Map.insert id t vEnv, fEnv), False)
-          return ((vEnv, fEnv), False)
-        else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
-                    ++ " to variable of type " ++ typeToStr t ++ " at line " ++ posToStr pos]
+  expectedTypeOfVar <- checkTypeForId id pos
+  typeOfExpr <- typeCheckExpr e
+  if typeEquals typeOfExpr expectedTypeOfVar
+    then do
+      env <- ask
+      return (env, False)
+    else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
+                ++ " to variable of type " ++ typeToStr expectedTypeOfVar ++ " at line " ++ posToStr pos]
+
 typeCheckStmt (Incr pos id) t = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of
-    Nothing -> throwError ["Uninitialized variable at line " ++ posToStr pos]
-    Just typeOfVar -> do
-      if not $ isInt typeOfVar
-        then throwError ["Cannot increment non-integer value at line " ++ posToStr pos]
-        else return ((vEnv, fEnv), False)
+  typeOfVar <- checkTypeForId id pos
+  if not $ isInt typeOfVar
+    then throwError ["Cannot increment non-integer value at line " ++ posToStr pos]
+    else do 
+      env <- ask
+      return (env, False)
+
 typeCheckStmt (Decr pos id) t = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of
-    Nothing -> throwError ["Uninitialized variable at line " ++ posToStr pos]
-    Just typeOfVar -> do
-      if not $ isInt typeOfVar
-        then throwError ["Cannot decrement non-integer value at line " ++ posToStr pos]
-        else return ((vEnv, fEnv), False)
+  typeOfVar <- checkTypeForId id pos
+  if not $ isInt typeOfVar
+    then throwError ["Cannot decrement non-integer value at line " ++ posToStr pos]
+    else do 
+      env <- ask
+      return (env, False)
+
 typeCheckStmt (Ret pos e) expectedRetType = do
   if isVoid expectedRetType
     then throwError ["Cannot return value from void function at line " ++ posToStr pos]
@@ -299,9 +308,10 @@ typeCheckStmt (While pos condExpr stmt) t = do
       (_, _) <- typeCheckStmt stmt t
       return (env, False)
 typeCheckStmt (BStmt pos (Block posB stmts)) t = do
-  env <- ask
-  (env', wasReturn) <- typeCheckStmts stmts t
-  return (env, wasReturn)
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  let newEnvOld = Map.union vEnvNew vEnvOld
+  (_, wasReturn) <- local (const (Map.empty, newEnvOld, fEnv)) $ typeCheckStmts stmts t
+  return ((vEnvNew, vEnvOld, fEnv), wasReturn) --zwracamy środowisko niezmienione
 typeCheckStmt (Decl pos t []) typ = do
   throwError ["Wrong declaration."]
 typeCheckStmt (Decl pos t items) typ = do
@@ -315,8 +325,8 @@ typeCheckStmt (Decl pos t items) typ = do
 typeCheckDecls :: [Item] -> Type -> IM TypeEnv
 typeCheckDecls [] _ = ask
 typeCheckDecls (Init  pos id e : items) t = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of 
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  case Map.lookup id vEnvNew of 
     Just _ -> throwError ["Multiple declaration of variable '" ++ identToString id ++ "' at line: " ++ posToStr pos]
     Nothing -> do
       case Map.lookup id fEnv of
@@ -326,21 +336,21 @@ typeCheckDecls (Init  pos id e : items) t = do
           typeOfExpr <- typeCheckExpr e
           if typeEquals typeOfExpr t
             then do
-              let env' = (Map.insert id t vEnv, fEnv)
+              let env' = (Map.insert id t vEnvNew, vEnvOld, fEnv)
               env'' <- local (const env') $ typeCheckDecls items t
               return env''
             else throwError ["Cannot assign type " ++ typeToStr typeOfExpr
                             ++ " to variable of type " ++ typeToStr t ++ " at line: " ++ posToStr pos]
 typeCheckDecls (NoInit  pos id : items) t = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of 
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  case Map.lookup id vEnvNew of 
     Just _ -> throwError ["Multiple declaration of variable '" ++ identToString id ++ "' at line: " ++ posToStr pos]
     Nothing -> do
       case Map.lookup id fEnv of
         Just _ -> throwError ["Cannot declare a variable of name '" ++ identToString id 
                   ++ "' because a function of that name already exists. At line: " ++ posToStr pos]
         Nothing -> do
-          let env' = (Map.insert id t vEnv, fEnv)
+          let env' = (Map.insert id t vEnvNew, vEnvOld, fEnv)
           env'' <- local (const env') $ typeCheckDecls items t
           return env''
 
@@ -354,8 +364,8 @@ typeCheckStmts [stmt] t  = do
   (env', wasReturn) <- local (const env) $ typeCheckStmt stmt t
   return (env', wasReturn)
 typeCheckStmts (stmt : rest) t = do
-  (vEnv, fEnv) <- ask
-  (env', wasReturnInFirst) <- local (const (vEnv, fEnv)) $ typeCheckStmt stmt t
+  --(vEnvNew, vEnvOld, fEnv) <- ask
+  (env', wasReturnInFirst) <- typeCheckStmt stmt t
   (env'', wasReturnInRest) <- local (const env') $ typeCheckStmts rest t
   return (env'', wasReturnInFirst || wasReturnInRest)
 
@@ -363,15 +373,15 @@ typeCheckStmts (stmt : rest) t = do
 addArgsToEnv :: [Arg] -> IM TypeEnv
 addArgsToEnv [] = ask
 addArgsToEnv ((Arg pos argType id):args) = do
-  (vEnv, fEnv) <- ask
-  case Map.lookup id vEnv of 
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  case Map.lookup id vEnvNew of 
     Just _ -> throwError ["Several arguments with the same name: '" ++ identToString id ++ "' at line: " ++ posToStr pos]
     Nothing -> do
       case Map.lookup id fEnv of
         Just _ -> throwError ["Cannot name an argument with the name of an existing function: '" 
                       ++ identToString id ++ "' At line: " ++ posToStr pos]
         Nothing -> do
-          let env' = (Map.insert id argType vEnv, fEnv)
+          let env' = (Map.insert id argType vEnvNew, vEnvOld, fEnv)
           env'' <- local (const env') $ addArgsToEnv args
           return env''
 
@@ -397,18 +407,17 @@ typeCheckTopDefs [def] = do
   env' <- typeCheckTopDef def
   return env'
 typeCheckTopDefs (def : restDefs) = do
-  (vEnv, fEnv) <- ask
-  (_, _) <- typeCheckTopDef def
+  (_, _, _) <- typeCheckTopDef def
   --wywołujemy z envem lokalnym, bo nie chcemy, żeby zmienne deklarowane w funkcji f były widoczne w funkcji g
-  env'' <- local (const (vEnv, fEnv)) $ typeCheckTopDefs restDefs
-  return env''
+  env' <- typeCheckTopDefs restDefs
+  return env'
 
 
 addAllFunctionsToEnv :: [TopDef] -> IM TypeEnv
 addAllFunctionsToEnv [] = ask
 addAllFunctionsToEnv ((FnDef pos t id args (Block posB stmts)): restDefs) = do
-  (vEnv, fEnv) <- ask
-  let env' = (vEnv, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
+  (vEnvNew, vEnvOld, fEnv) <- ask
+  let env' = (vEnvNew, vEnvOld, Map.insert id (FunType {funName = id, funReturnType = t, funArgs = args}) fEnv)
   env'' <- local (const env') $ addAllFunctionsToEnv restDefs
   return env''
 
@@ -440,7 +449,7 @@ nth = Nothing
 
 
 initialEnv :: TypeEnv
-initialEnv = (Map.empty, mapWithInbuildFunctions)
+initialEnv = (Map.empty, Map.empty, mapWithInbuildFunctions)
   where
     mapWithInbuildFunctions = Map.fromList [
       (Ident "printInt", (FunType {
@@ -472,7 +481,6 @@ handleInput filename input = do
       hPutStrLn stderr $ "Syntax error in file: " ++ filename ++ ": " ++ err
       exitFailure
     Right code -> do
-      --print code
       let result = runMonad (typeCheckProgram code) initialEnv
       resultWithIo <- liftIO result
       case resultWithIo of

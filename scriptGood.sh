@@ -1,6 +1,6 @@
 #!/bin/bash
 
-INSC_LLVM="./insc"
+typeCheck_LLVM="./typeCheck"
 TESTS_DIR="lattests/good"
 
 for test_file in "$TESTS_DIR"/core*.lat; do
@@ -10,8 +10,8 @@ for test_file in "$TESTS_DIR"/core*.lat; do
     # Execute your command with the test file and capture its output
     echo "Running test: $input_path"
     # Replace the echo command below with the command you want to run
-    # Example: output=$("$INSC_LLVM" "$input_path")
-    output=$("$INSC_LLVM" "$input_path")
+    # Example: output=$("$typeCheck_LLVM" "$input_path")
+    output=$("$typeCheck_LLVM" "$input_path")
 
     # Print the output of the command
     #echo "Output of test $test_name:"

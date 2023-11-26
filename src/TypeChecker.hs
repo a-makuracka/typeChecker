@@ -115,15 +115,18 @@ typeCheckExpr (EAdd pos e1 op e2) = do
   typeOfE2 <- typeCheckExpr e2
   case (typeOfE1, typeOfE2) of
     (Int _, Int _) -> return $ Int pos
-    (Str _, Str _) -> return $ Str pos
-    (Bool _, Bool _) -> throwError $
-      "Cannot add boolean values." ++ showPos pos
+    (Str _, Str _) -> case op of 
+      (Plus _) -> return $ Str pos
+      (Minus _) -> throwError $ "Cannot subtract strings." ++ showPos pos
+    (Bool _, Bool _) -> case op of 
+      (Plus _) -> throwError $ "Cannot add boolean values." ++ showPos pos
+      (Minus _) -> throwError $ "Cannot subtract boolean values." ++ showPos pos
     (Int _, Str _) -> throwError $
-      "Left operand of 'add' operation is an integer and right operand is string." ++ showPos pos
+      "Left operand of " ++ addOpToStr op ++ " operation is an integer and right operand is string." ++ showPos pos
     (Str _, Int _) -> throwError $
-      "Left operand of 'add' operation is string and right operand is an integer." ++ showPos pos
+      "Left operand of " ++ addOpToStr op ++ " operation is string and right operand is an integer." ++ showPos pos
     (_, _) -> throwError $
-      "Wrong types of operands for 'add' operation." ++ showPos pos
+      "Wrong types of operands for " ++ addOpToStr op ++ " operation." ++ showPos pos
 
 typeCheckExpr (EMul pos e1 op e2) = do
   env <- ask
@@ -133,8 +136,8 @@ typeCheckExpr (EMul pos e1 op e2) = do
     then do
       if isInt typeOfE2
         then return $ Int pos
-        else throwError $ "Second argument of mul operation is a non-integer value." ++ showPos pos
-    else throwError $ "First argument of mul operation is a non-integer value." ++ showPos pos
+        else throwError $ "Second argument of " ++ mulOpToStr op ++ " operation is a non-integer value." ++ showPos pos
+    else throwError $ "First argument of " ++ mulOpToStr op ++ " o operation is a non-integer value." ++ showPos pos
 
 typeCheckExpr (ERel pos e1 op e2) = do
   env <- ask
@@ -448,5 +451,5 @@ main = do
       input <- readFile filename
       handleInput filename input
     _ -> do
-      hPutStrLn stderr "Usage: ./insc program"
+      hPutStrLn stderr "Usage: ./typeCheck program"
       exitFailure

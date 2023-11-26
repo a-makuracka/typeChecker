@@ -58,6 +58,22 @@ isBool (Bool _) = True
 isBool _        = False
 
 
+isPlus :: AddOp -> Bool
+isPlus (Plus _) = True
+isPlus (Minus _) = False 
+
+
+addOpToStr :: AddOp -> String
+addOpToStr (Plus _) = "'add'"
+addOpToStr (Minus _) = "'sub'" 
+
+
+mulOpToStr :: MulOp -> String
+mulOpToStr (Times _) = "'mul'"
+mulOpToStr (Div _) = "'div'" 
+mulOpToStr (Mod _) = "'mod'" 
+
+
 nth :: BNFC'Position
 nth = Nothing
 

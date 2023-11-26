@@ -287,8 +287,10 @@ typeCheckStmt (While pos condExpr stmt) t = do
   if not $ isBool typeOfExpr
     then throwError $ "Condition has to be boolean." ++ showPos pos
     else do
-      (_, _) <- typeCheckStmt stmt t
-      return (env, False)
+      (_, wasThereReturn) <- typeCheckStmt stmt t
+      if isAlwaysTrue condExpr
+        then return (env, wasThereReturn)
+        else return (env, False)
 
 typeCheckStmt (BStmt pos (Block posB stmts)) t = do
   (vEnvNew, vEnvOld, fEnv) <- ask
@@ -428,13 +430,13 @@ handleInput :: FilePath -> String -> IO ()
 handleInput filename input = do
   case parse input of
     Left err -> do
-      hPutStrLn stderr $ "Syntax error in file: " ++ filename ++ ": " ++ err
+      hPutStrLn stderr $ "ERROR:\n" ++ "Syntax error in file: " ++ filename ++ ": " ++ err
       exitFailure
     Right code -> do
       let result = runMonad (typeCheckProgram code) initialEnv
       resultWithIo <- liftIO result
       case resultWithIo of
-        Left errMsg -> hPutStrLn stderr $ "Error: " ++ errMsg ++ "."
+        Left errMsg -> hPutStrLn stderr $ "ERROR:\n" ++ errMsg ++ "."
         Right env -> hPutStrLn stderr "OK"
 
 

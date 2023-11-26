@@ -434,8 +434,8 @@ handleInput filename input = do
       let result = runMonad (typeCheckProgram code) initialEnv
       resultWithIo <- liftIO result
       case resultWithIo of
-        Left errMsg -> putStrLn $ "Error: " ++ errMsg ++ "."
-        Right env -> putStrLn "OK"
+        Left errMsg -> hPutStrLn stderr $ "Error: " ++ errMsg ++ "."
+        Right env -> hPutStrLn stderr "OK"
 
 
 main :: IO ()
